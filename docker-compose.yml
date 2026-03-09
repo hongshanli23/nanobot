@@ -2,8 +2,16 @@ x-common-config: &common-config
   build:
     context: .
     dockerfile: Dockerfile
+  user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
+  environment:
+    HOME: /home/${LOCAL_USER:-nanobot}
+    USER: ${LOCAL_USER:-nanobot}
+    LOGNAME: ${LOCAL_USER:-nanobot}
+  working_dir: /home/${LOCAL_USER:-nanobot}/nanobot
   volumes:
-    - ~/.nanobot:/root/.nanobot
+    - ${HOME}/nanobot:/home/${LOCAL_USER:-nanobot}/nanobot
+    - ${HOME}/.nanobot:/home/${LOCAL_USER:-nanobot}/.nanobot
+    - ${HOME}/.ssh:/home/${LOCAL_USER:-nanobot}/.ssh
 
 services:
   nanobot-gateway:
@@ -16,12 +24,12 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '1'
+          cpus: "1"
           memory: 1G
         reservations:
-          cpus: '0.25'
+          cpus: "0.25"
           memory: 256M
-  
+
   nanobot-cli:
     <<: *common-config
     profiles:
