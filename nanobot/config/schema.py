@@ -308,6 +308,54 @@ class ExecToolConfig(Base):
     path_append: str = ""
 
 
+class RetrievalPerplexityConfig(Base):
+    """Perplexity embeddings configuration for retrieval."""
+
+    api_key: str = ""
+    model: str = "pplx-embed-context-v1-4b"
+
+
+class RetrievalQdrantConfig(Base):
+    """Qdrant configuration for retrieval index/search."""
+
+    url: str = "http://localhost:6333"
+    api_key: str = ""
+    documents_collection: str = "documents"
+
+
+class RetrievalObjectStoreS3Config(Base):
+    """AWS S3-specific object-store settings."""
+
+    region: str = "us-west-2"
+
+
+class RetrievalObjectStoreConfig(Base):
+    """Object-store settings for canonical source storage (required)."""
+
+    provider: Literal["s3"] = "s3"
+    bucket: str = ""
+    prefix: str = "documents"
+    s3: RetrievalObjectStoreS3Config = Field(default_factory=RetrievalObjectStoreS3Config)
+
+
+class RetrievalChunkingConfig(Base):
+    """Plain-text chunking configuration for ingestion."""
+
+    max_chars: int = 1500
+    overlap_chars: int = 200
+    min_chunk_chars: int = 100
+
+
+class RetrievalToolsConfig(Base):
+    """Retrieval tool configuration."""
+
+    enabled: bool = False
+    perplexity: RetrievalPerplexityConfig = Field(default_factory=RetrievalPerplexityConfig)
+    qdrant: RetrievalQdrantConfig = Field(default_factory=RetrievalQdrantConfig)
+    object_store: RetrievalObjectStoreConfig = Field(default_factory=RetrievalObjectStoreConfig)
+    chunking: RetrievalChunkingConfig = Field(default_factory=RetrievalChunkingConfig)
+
+
 class MCPServerConfig(Base):
     """MCP server connection configuration (stdio or HTTP)."""
 
@@ -325,6 +373,7 @@ class ToolsConfig(Base):
 
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
+    retrieval: RetrievalToolsConfig = Field(default_factory=RetrievalToolsConfig)
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 

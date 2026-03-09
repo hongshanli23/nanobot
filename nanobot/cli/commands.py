@@ -317,6 +317,14 @@ def gateway(
     provider = _make_provider(config)
     session_manager = SessionManager(config.workspace_path)
 
+    if config.tools.retrieval.enabled and not (
+        config.tools.retrieval.perplexity.api_key or os.environ.get("PERPLEXITY_API_KEY")
+    ):
+        console.print(
+            "[yellow]Warning: retrieval is enabled but Perplexity API key is not set "
+            "(tools.retrieval.perplexity.apiKey or PERPLEXITY_API_KEY).[/yellow]"
+        )
+
     # Create cron service first (callback set after agent creation)
     cron_store_path = get_cron_dir() / "jobs.json"
     cron = CronService(cron_store_path)
@@ -335,6 +343,7 @@ def gateway(
         brave_api_key=config.tools.web.search.api_key or None,
         web_proxy=config.tools.web.proxy or None,
         exec_config=config.tools.exec,
+        retrieval_config=config.tools.retrieval,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         session_manager=session_manager,
@@ -520,6 +529,7 @@ def agent(
         brave_api_key=config.tools.web.search.api_key or None,
         web_proxy=config.tools.web.proxy or None,
         exec_config=config.tools.exec,
+        retrieval_config=config.tools.retrieval,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         mcp_servers=config.tools.mcp_servers,
