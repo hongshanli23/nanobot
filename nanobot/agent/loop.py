@@ -140,35 +140,32 @@ class AgentLoop:
             self.tools.register(CronTool(self.cron_service))
 
         if self.retrieval_config and self.retrieval_config.enabled:
-            try:
-                retrieval = build_retrieval_client_from_config(self.retrieval_config)
-                object_store = ObjectStoreCache(
-                    provider=self.retrieval_config.object_store.provider,
-                    bucket=self.retrieval_config.object_store.bucket,
-                    prefix=self.retrieval_config.object_store.prefix,
-                    s3_region=self.retrieval_config.object_store.s3.region,
+            retrieval = build_retrieval_client_from_config(self.retrieval_config)
+            object_store = ObjectStoreCache(
+                provider=self.retrieval_config.object_store.provider,
+                bucket=self.retrieval_config.object_store.bucket,
+                prefix=self.retrieval_config.object_store.prefix,
+                s3_region=self.retrieval_config.object_store.s3.region,
+            )
+            chunker = DocumentChunker(
+                max_chars=self.retrieval_config.chunking.max_chars,
+                overlap_chars=self.retrieval_config.chunking.overlap_chars,
+                min_chunk_chars=self.retrieval_config.chunking.min_chunk_chars,
+            )
+            self.tools.register(
+                IngestDocumentTool(
+                    retrieval=retrieval,
+                    object_store=object_store,
+                    documents_collection=self.retrieval_config.qdrant.documents_collection,
+                    chunker=chunker,
                 )
-                chunker = DocumentChunker(
-                    max_chars=self.retrieval_config.chunking.max_chars,
-                    overlap_chars=self.retrieval_config.chunking.overlap_chars,
-                    min_chunk_chars=self.retrieval_config.chunking.min_chunk_chars,
+            )
+            self.tools.register(
+                RetrieveDocumentsTool(
+                    retrieval=retrieval,
+                    documents_collection=self.retrieval_config.qdrant.documents_collection,
                 )
-                self.tools.register(
-                    IngestDocumentTool(
-                        retrieval=retrieval,
-                        object_store=object_store,
-                        documents_collection=self.retrieval_config.qdrant.documents_collection,
-                        chunker=chunker,
-                    )
-                )
-                self.tools.register(
-                    RetrieveDocumentsTool(
-                        retrieval=retrieval,
-                        documents_collection=self.retrieval_config.qdrant.documents_collection,
-                    )
-                )
-            except Exception as e:
-                logger.warning("Retrieval tools disabled due to initialization error: {}", e)
+            )
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
