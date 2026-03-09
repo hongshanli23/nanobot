@@ -108,6 +108,18 @@ def test_exec_extract_absolute_paths_captures_posix_absolute_paths() -> None:
     assert "/tmp/out.txt" in paths
 
 
+def test_exec_custom_deny_patterns_extend_defaults() -> None:
+    tool = ExecTool(deny_patterns=[r"\bgit\s+push\b"])
+    assert any("git" in p for p in tool.deny_patterns)
+    assert any("rm" in p for p in tool.deny_patterns)
+
+
+def test_exec_guard_blocks_custom_forbidden_command() -> None:
+    tool = ExecTool(deny_patterns=[r"\bgit\s+push\b"])
+    result = tool._guard_command("git push origin main", "/tmp")
+    assert result == "Error: Command blocked by safety guard (dangerous pattern detected)"
+
+
 # --- cast_params tests ---
 
 

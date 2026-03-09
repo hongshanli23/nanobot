@@ -103,6 +103,7 @@ class SubagentManager:
             tools.register(ExecTool(
                 working_dir=str(self.workspace),
                 timeout=self.exec_config.timeout,
+                deny_patterns=self.exec_config.forbidden_commands,
                 restrict_to_workspace=self.restrict_to_workspace,
                 path_append=self.exec_config.path_append,
             ))

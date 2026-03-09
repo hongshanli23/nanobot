@@ -306,6 +306,7 @@ class ExecToolConfig(Base):
 
     timeout: int = 60
     path_append: str = ""
+    forbidden_commands: list[str] = Field(default_factory=list)
 
 
 class RetrievalPerplexityConfig(Base):
