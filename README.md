@@ -1075,21 +1075,57 @@ The agent can also manage this file itself — ask it to "add a periodic task" a
 
 ## 🐳 Docker
 
-> [!TIP]
-> The `-v ~/.nanobot:/root/.nanobot` flag mounts your local config directory into the container, so your config and workspace persist across container restarts.
+### Docker Compose (interactive dev + git push)
 
-### Docker Compose
+The provided `docker-compose.yml` is set up for interactive development:
+
+- mounts `~/nanobot` into the container (edit code from either side)
+- mounts `~/.nanobot` (shared config/workspace)
+- mounts `~/.ssh` (so `git push` works from inside container)
+- runs container with your host UID/GID to avoid permission mismatch
+
+**1) Configure local identity for Compose**
 
 ```bash
-docker compose run --rm nanobot-cli onboard   # first-time setup
-vim ~/.nanobot/config.json                     # add API keys
-docker compose up -d nanobot-gateway           # start gateway
+cd ~/nanobot
+cp .env.example .env
 ```
 
+Edit `.env` and set:
+
+```dotenv
+LOCAL_USER=<your local username>
+LOCAL_UID=<id -u>
+LOCAL_GID=<id -g>
+```
+
+You can get values with:
+
 ```bash
-docker compose run --rm nanobot-cli agent -m "Hello!"   # run CLI
-docker compose logs -f nanobot-gateway                   # view logs
-docker compose down                                      # stop
+id -un
+id -u
+id -g
+```
+
+**2) First-time setup in container**
+
+```bash
+docker compose --profile cli run --rm nanobot-cli onboard
+vim ~/.nanobot/config.json
+```
+
+**3) Run agent interactively inside container**
+
+```bash
+docker compose --profile cli run --rm nanobot-cli agent
+```
+
+**4) Start/stop gateway**
+
+```bash
+docker compose up -d nanobot-gateway
+docker compose logs -f nanobot-gateway
+docker compose down
 ```
 
 ### Docker
