@@ -1083,6 +1083,7 @@ The provided `docker-compose.yml` is set up for interactive development:
 - mounts `~/nanobot` into the container (edit code from either side)
 - mounts `~/.nanobot` (shared config/workspace)
 - mounts `~/.ssh` (so `git push` works from inside container)
+- mounts `~/.codex` (shared Codex auth/config in container at `~/.codex`)
 - runs container with your host UID/GID to avoid permission mismatch
 
 **1) Configure local identity for Compose**

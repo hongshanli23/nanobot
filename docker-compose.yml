@@ -12,6 +12,7 @@ x-common-config: &common-config
     - ${HOME}/nanobot:/home/${LOCAL_USER:-nanobot}/nanobot
     - ${HOME}/.nanobot:/home/${LOCAL_USER:-nanobot}/.nanobot
     - ${HOME}/.ssh:/home/${LOCAL_USER:-nanobot}/.ssh
+    - ${HOME}/.codex:/home/${LOCAL_USER:-nanobot}/.codex
 
 services:
   nanobot-gateway:
