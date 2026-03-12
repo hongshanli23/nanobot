@@ -36,10 +36,7 @@ class CustomProvider(LLMProvider):
             kwargs["reasoning_effort"] = reasoning_effort
         if tools:
             kwargs.update(tools=tools, tool_choice="auto")
-        try:
-            return self._parse(await self._client.chat.completions.create(**kwargs))
-        except Exception as e:
-            return LLMResponse(content=f"Error: {e}", finish_reason="error")
+        return self._parse(await self._client.chat.completions.create(**kwargs))
 
     def _parse(self, response: Any) -> LLMResponse:
         choice = response.choices[0]

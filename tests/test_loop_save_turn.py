@@ -1,5 +1,10 @@
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.loop import AgentLoop
+from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session
 
 
@@ -39,3 +44,35 @@ def test_save_turn_keeps_image_placeholder_after_runtime_strip() -> None:
         skip=0,
     )
     assert session.messages[0]["content"] == [{"type": "text", "text": "[image]"}]
+
+
+class _DummyProvider(LLMProvider):
+    async def chat(self, *args, **kwargs):
+        raise NotImplementedError
+
+    def get_default_model(self) -> str:
+        return "dummy-model"
+
+
+@pytest.mark.asyncio
+async def test_run_agent_loop_surfaces_provider_exception() -> None:
+    loop = AgentLoop.__new__(AgentLoop)
+    loop._TOOL_RESULT_MAX_CHARS = 500
+    loop.max_iterations = 40
+    loop.provider = _DummyProvider()
+    loop.provider.chat = AsyncMock(side_effect=RuntimeError("boom"))
+    loop.tools = MagicMock()
+    loop.tools.get_definitions = MagicMock(return_value=[])
+    loop.model = "dummy-model"
+    loop.temperature = 0.1
+    loop.max_tokens = 4096
+    loop.reasoning_effort = None
+    loop.context = MagicMock()
+
+    final_content, tools_used, messages = await loop._run_agent_loop([
+        {"role": "user", "content": "hi"}
+    ])
+
+    assert final_content == "Error calling AI model: RuntimeError('boom')"
+    assert tools_used == []
+    assert messages == [{"role": "user", "content": "hi"}]
