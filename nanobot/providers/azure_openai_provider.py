@@ -140,23 +140,13 @@ class AzureOpenAIProvider(LLMProvider):
             deployment_name, messages, tools, max_tokens, temperature, reasoning_effort
         )
 
-        try:
-            async with httpx.AsyncClient(timeout=60.0, verify=True) as client:
-                response = await client.post(url, headers=headers, json=payload)
-                if response.status_code != 200:
-                    return LLMResponse(
-                        content=f"Azure OpenAI API Error {response.status_code}: {response.text}",
-                        finish_reason="error",
-                    )
-                
-                response_data = response.json()
-                return self._parse_response(response_data)
+        async with httpx.AsyncClient(timeout=60.0, verify=True) as client:
+            response = await client.post(url, headers=headers, json=payload)
+            if response.status_code != 200:
+                raise RuntimeError(f"Azure OpenAI API Error {response.status_code}: {response.text}")
 
-        except Exception as e:
-            return LLMResponse(
-                content=f"Error calling Azure OpenAI: {repr(e)}",
-                finish_reason="error",
-            )
+            response_data = response.json()
+            return self._parse_response(response_data)
 
     def _parse_response(self, response: dict[str, Any]) -> LLMResponse:
         """Parse Azure OpenAI response into our standard format."""
@@ -200,10 +190,7 @@ class AzureOpenAIProvider(LLMProvider):
             )
 
         except (KeyError, IndexError) as e:
-            return LLMResponse(
-                content=f"Error parsing Azure OpenAI response: {str(e)}",
-                finish_reason="error",
-            )
+            raise ValueError(f"Error parsing Azure OpenAI response: {str(e)}") from e
 
     def get_default_model(self) -> str:
         """Get the default model (also used as default deployment name)."""

@@ -308,12 +308,8 @@ async def test_chat_api_error():
         mock_client.return_value.__aenter__.return_value = mock_context
         
         messages = [{"role": "user", "content": "Hello"}]
-        result = await provider.chat(messages)
-        
-        assert isinstance(result, LLMResponse)
-        assert "Azure OpenAI API Error 401" in result.content
-        assert "Invalid authentication credentials" in result.content
-        assert result.finish_reason == "error"
+        with pytest.raises(RuntimeError, match="Azure OpenAI API Error 401: Invalid authentication credentials"):
+            await provider.chat(messages)
 
 
 @pytest.mark.asyncio
@@ -331,11 +327,8 @@ async def test_chat_connection_error():
         mock_client.return_value.__aenter__.return_value = mock_context
         
         messages = [{"role": "user", "content": "Hello"}]
-        result = await provider.chat(messages)
-        
-        assert isinstance(result, LLMResponse)
-        assert "Error calling Azure OpenAI: Exception('Connection failed')" in result.content
-        assert result.finish_reason == "error"
+        with pytest.raises(Exception, match="Connection failed"):
+            await provider.chat(messages)
 
 
 def test_parse_response_malformed():
@@ -348,11 +341,8 @@ def test_parse_response_malformed():
     
     # Test with missing choices
     malformed_response = {"usage": {"prompt_tokens": 10}}
-    result = provider._parse_response(malformed_response)
-    
-    assert isinstance(result, LLMResponse)
-    assert "Error parsing Azure OpenAI response" in result.content
-    assert result.finish_reason == "error"
+    with pytest.raises(ValueError, match="Error parsing Azure OpenAI response"):
+        provider._parse_response(malformed_response)
 
 
 def test_get_default_model():

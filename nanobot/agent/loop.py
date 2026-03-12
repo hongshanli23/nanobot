@@ -229,14 +229,35 @@ class AgentLoop:
         while iteration < self.max_iterations:
             iteration += 1
 
-            response = await self.provider.chat(
-                messages=messages,
-                tools=self.tools.get_definitions(),
-                model=self.model,
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-                reasoning_effort=self.reasoning_effort,
-            )
+            try:
+                response = await self.provider.chat(
+                    messages=messages,
+                    tools=self.tools.get_definitions(),
+                    model=self.model,
+                    temperature=self.temperature,
+                    max_tokens=self.max_tokens,
+                    reasoning_effort=self.reasoning_effort,
+                )
+            except Exception as e:
+                provider_name = self.provider.__class__.__name__
+                provider_label = {
+                    "OpenAICodexProvider": "Codex",
+                    "AzureOpenAIProvider": "Azure OpenAI",
+                    "LiteLLMProvider": "LLM",
+                    "CustomProvider": "LLM",
+                }.get(provider_name)
+                if not provider_label:
+                    if (
+                        provider_name.endswith("Provider")
+                        and provider_name != "LLMProvider"
+                        and not provider_name.startswith("_")
+                    ):
+                        provider_label = provider_name.removesuffix("Provider") or "AI model"
+                    else:
+                        provider_label = "AI model"
+                logger.exception("{} call failed", provider_label)
+                final_content = f"Error calling {provider_label}: {e!r}"
+                break
 
             if response.has_tool_calls:
                 if on_progress:
