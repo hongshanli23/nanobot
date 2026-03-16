@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from nanobot.session.transcript import render_for_memory
 from nanobot.utils.helpers import ensure_dir
 
 if TYPE_CHECKING:
@@ -96,10 +97,11 @@ class MemoryStore:
 
         lines = []
         for m in old_messages:
-            if not m.get("content"):
+            role, content, tools_used = render_for_memory(m)
+            if role == "internal" or not content:
                 continue
-            tools = f" [tools: {', '.join(m['tools_used'])}]" if m.get("tools_used") else ""
-            lines.append(f"[{m.get('timestamp', '?')[:16]}] {m['role'].upper()}{tools}: {m['content']}")
+            tools = f" [tools: {', '.join(tools_used)}]" if tools_used else ""
+            lines.append(f"[{m.get('timestamp', '?')[:16]}] {role.upper()}{tools}: {content}")
 
         current_memory = self.read_long_term()
         prompt = f"""Process this conversation and call the save_memory tool with your consolidation.

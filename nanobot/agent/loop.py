@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import uuid
 import weakref
 from contextlib import AsyncExitStack
 from pathlib import Path
@@ -26,6 +27,14 @@ from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
+from nanobot.session.transcript import ASSISTANT_ITEM_TYPE
+from nanobot.session.transcript import TOOL_RESULT_ITEM_TYPE
+from nanobot.session.transcript import USER_ITEM_TYPE
+from nanobot.session.transcript import TranscriptItem
+from nanobot.session.transcript import build_summary_record
+from nanobot.session.transcript import build_tool_call_record
+from nanobot.session.transcript import stringify_tool_result
+from nanobot.utils.helpers import safe_filename
 
 if TYPE_CHECKING:
     from nanobot.config.schema import ChannelsConfig, ExecToolConfig
@@ -475,16 +484,22 @@ class AgentLoop:
         )
 
     def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
-        """Save new-turn messages into session, truncating large tool results."""
+        """Save new-turn messages into a typed transcript."""
         from datetime import datetime
-        for m in messages[skip:]:
+        turn_id = uuid.uuid4().hex
+        summary_parts: dict[str, Any] = {
+            "user": [],
+            "assistant": [],
+            "tools": [],
+            "tool_results": 0,
+        }
+        last_timestamp: str | None = None
+        for index, m in enumerate(messages[skip:]):
             entry = dict(m)
             role, content = entry.get("role"), entry.get("content")
             if role == "assistant" and not content and not entry.get("tool_calls"):
                 continue  # skip empty assistant messages — they poison session context
-            if role == "tool" and isinstance(content, str) and len(content) > self._TOOL_RESULT_MAX_CHARS:
-                entry["content"] = content[:self._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
-            elif role == "user":
+            if role == "user":
                 if isinstance(content, str) and content.startswith(ContextBuilder._RUNTIME_CONTEXT_TAG):
                     # Strip the runtime-context prefix, keep only the user text.
                     parts = content.split("\n\n", 1)
@@ -505,9 +520,146 @@ class AgentLoop:
                     if not filtered:
                         continue
                     entry["content"] = filtered
-            entry.setdefault("timestamp", datetime.now().isoformat())
+            timestamp = entry.setdefault("timestamp", datetime.now().isoformat())
+            last_timestamp = timestamp
+
+            if role == "user":
+                user_excerpt = self._summarize_turn_content(entry.get("content", ""))
+                if user_excerpt:
+                    summary_parts["user"].append(user_excerpt)
+                session.messages.append(TranscriptItem(
+                    type=USER_ITEM_TYPE,
+                    content=entry.get("content", ""),
+                    timestamp=timestamp,
+                    turn_id=turn_id,
+                ).to_record())
+                continue
+
+            if role == "assistant":
+                assistant_excerpt = self._summarize_turn_content(entry.get("content"))
+                if assistant_excerpt:
+                    summary_parts["assistant"].append(assistant_excerpt)
+                session.messages.append(TranscriptItem(
+                    type=ASSISTANT_ITEM_TYPE,
+                    content=entry.get("content"),
+                    timestamp=timestamp,
+                    turn_id=turn_id,
+                ).to_record())
+                # Persist tool calls as separate typed records so later prompt
+                # reconstruction does not need to infer them from raw text.
+                for tc in entry.get("tool_calls") or []:
+                    function = tc.get("function", {})
+                    tool_name = function.get("name", "unknown")
+                    summary_parts["tools"].append(tool_name)
+                    session.messages.append(build_tool_call_record(
+                        tc.get("id"),
+                        tool_name,
+                        function.get("arguments") or "{}",
+                        turn_id=turn_id,
+                        timestamp=timestamp,
+                    ))
+                continue
+
+            if role == "tool":
+                raw_content = stringify_tool_result(content)
+                # Keep the transcript compact for the model, but preserve the
+                # complete raw output on disk for inspection/debugging.
+                raw_path = self._persist_tool_result_raw(
+                    session=session,
+                    call_id=entry.get("tool_call_id"),
+                    content=raw_content,
+                    fallback_index=index,
+                )
+                model_visible = raw_content
+                if len(model_visible) > self._TOOL_RESULT_MAX_CHARS:
+                    model_visible = model_visible[:self._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
+                summary_parts["tool_results"] += 1
+                if entry.get("name"):
+                    summary_parts["tools"].append(entry["name"])
+                session.messages.append(TranscriptItem(
+                    type=TOOL_RESULT_ITEM_TYPE,
+                    content=model_visible,
+                    timestamp=timestamp,
+                    turn_id=turn_id,
+                    call_id=entry.get("tool_call_id"),
+                    tool_name=entry.get("name"),
+                    raw_path=raw_path,
+                ).to_record())
+                continue
+
             session.messages.append(entry)
+        summary = self._build_turn_summary(summary_parts)
+        if summary:
+            session.messages.append(build_summary_record(
+                summary,
+                turn_id=turn_id,
+                timestamp=last_timestamp,
+                tools_used=sorted(set(summary_parts["tools"])),
+            ))
         session.updated_at = datetime.now()
+
+    @staticmethod
+    def _summarize_turn_content(content: Any, max_chars: int = 160) -> str:
+        """Render mixed content into one compact summary string."""
+        if content is None:
+            return ""
+        if isinstance(content, str):
+            text = content.strip()
+        elif isinstance(content, list):
+            parts: list[str] = []
+            for item in content:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("type") == "text":
+                    text = item.get("text", "").strip()
+                    if text:
+                        parts.append(text)
+                elif item.get("type") == "image_url":
+                    parts.append("[image]")
+            text = " ".join(parts).strip()
+        else:
+            text = str(content).strip()
+        text = re.sub(r"\s+", " ", text)
+        if len(text) > max_chars:
+            return text[: max_chars - 3].rstrip() + "..."
+        return text
+
+    def _build_turn_summary(self, parts: dict[str, Any]) -> str:
+        """Create one lightweight transcript summary for older turns."""
+        segments: list[str] = []
+        if parts["user"]:
+            segments.append(f"User: {parts['user'][0]}")
+        tool_names = sorted(set(parts["tools"]))
+        if tool_names:
+            tool_text = ", ".join(tool_names[:3])
+            if len(tool_names) > 3:
+                tool_text += ", ..."
+            suffix = f" ({parts['tool_results']} result{'s' if parts['tool_results'] != 1 else ''})" if parts["tool_results"] else ""
+            segments.append(f"Tools: {tool_text}{suffix}")
+        if parts["assistant"]:
+            segments.append(f"Assistant: {parts['assistant'][-1]}")
+        if not segments:
+            return ""
+        return "[Turn summary] " + " | ".join(segments)
+
+    @staticmethod
+    def _persist_tool_result_raw(
+        session: Session,
+        call_id: str | None,
+        content: str,
+        fallback_index: int,
+    ) -> str | None:
+        """Persist full raw tool output outside the prompt transcript."""
+        artifacts_dir = session.artifacts_dir
+        if artifacts_dir is None or not content:
+            return None
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
+        # Reuse the tool call id when available so the transcript and raw file
+        # can be correlated without extra indexing.
+        token = safe_filename(call_id or f"tool_{fallback_index}_{uuid.uuid4().hex}")
+        path = artifacts_dir / f"{token}.txt"
+        path.write_text(content, encoding="utf-8")
+        return str(path)
 
     async def _consolidate_memory(self, session, archive_all: bool = False) -> bool:
         """Delegate to MemoryStore.consolidate(). Returns True on success."""

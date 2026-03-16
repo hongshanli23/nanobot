@@ -10,6 +10,8 @@ from typing import Any
 from loguru import logger
 
 from nanobot.config.paths import get_legacy_sessions_dir
+from nanobot.session.transcript import TRANSCRIPT_ITEM_TYPE
+from nanobot.session.transcript import compile_history
 from nanobot.utils.helpers import ensure_dir, safe_filename
 
 
@@ -31,10 +33,13 @@ class Session:
     updated_at: datetime = field(default_factory=datetime.now)
     metadata: dict[str, Any] = field(default_factory=dict)
     last_consolidated: int = 0  # Number of messages already consolidated to files
+    artifacts_dir: Path | None = None
 
     def add_message(self, role: str, content: str, **kwargs: Any) -> None:
         """Add a message to the session."""
         msg = {
+            "_type": TRANSCRIPT_ITEM_TYPE,
+            "type": role,
             "role": role,
             "content": content,
             "timestamp": datetime.now().isoformat(),
@@ -44,24 +49,12 @@ class Session:
         self.updated_at = datetime.now()
 
     def get_history(self, max_messages: int = 500) -> list[dict[str, Any]]:
-        """Return unconsolidated messages for LLM input, aligned to a user turn."""
+        """Return normalized unconsolidated history for LLM input."""
         unconsolidated = self.messages[self.last_consolidated:]
-        sliced = unconsolidated[-max_messages:]
-
-        # Drop leading non-user messages to avoid orphaned tool_result blocks
-        for i, m in enumerate(sliced):
-            if m.get("role") == "user":
-                sliced = sliced[i:]
-                break
-
-        out: list[dict[str, Any]] = []
-        for m in sliced:
-            entry: dict[str, Any] = {"role": m["role"], "content": m.get("content", "")}
-            for k in ("tool_calls", "tool_call_id", "name"):
-                if k in m:
-                    entry[k] = m[k]
-            out.append(entry)
-        return out
+        # Compile the typed transcript back into provider-facing chat messages
+        # while preserving turn boundaries and collapsing older turns to their
+        # stored summaries.
+        return compile_history(unconsolidated, max_messages=max_messages)
 
     def clear(self) -> None:
         """Clear all messages and reset session to initial state."""
@@ -93,6 +86,11 @@ class SessionManager:
         safe_key = safe_filename(key.replace(":", "_"))
         return self.legacy_sessions_dir / f"{safe_key}.jsonl"
 
+    def _get_artifacts_dir(self, key: str) -> Path:
+        """Directory for session-scoped raw tool outputs."""
+        safe_key = safe_filename(key.replace(":", "_"))
+        return ensure_dir(self.workspace / "session_artifacts" / safe_key)
+
     def get_or_create(self, key: str) -> Session:
         """
         Get an existing session or create a new one.
@@ -104,11 +102,13 @@ class SessionManager:
             The session.
         """
         if key in self._cache:
+            self._cache[key].artifacts_dir = self._get_artifacts_dir(key)
             return self._cache[key]
 
         session = self._load(key)
         if session is None:
             session = Session(key=key)
+        session.artifacts_dir = self._get_artifacts_dir(key)
 
         self._cache[key] = session
         return session
@@ -154,7 +154,8 @@ class SessionManager:
                 messages=messages,
                 created_at=created_at or datetime.now(),
                 metadata=metadata,
-                last_consolidated=last_consolidated
+                last_consolidated=last_consolidated,
+                artifacts_dir=self._get_artifacts_dir(key),
             )
         except Exception as e:
             logger.warning("Failed to load session {}: {}", key, e)
