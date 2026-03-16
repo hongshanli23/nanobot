@@ -143,8 +143,11 @@ def _group_records_by_turn(records: list[dict[str, Any]]) -> list[dict[str, Any]
 
     for index, record in enumerate(records):
         if not is_typed_record(record):
-            turns.append({"turn_id": f"legacy-{index}", "records": [record], "summary": None})
-            current_turn = None
+            role = record.get("role")
+            if current_turn is None or (role == "user" and current_turn["records"]):
+                current_turn = {"turn_id": f"legacy-{index}", "records": [], "summary": None}
+                turns.append(current_turn)
+            current_turn["records"].append(record)
             continue
 
         turn_id = record.get("turn_id") or f"legacy-{index}"
@@ -174,14 +177,31 @@ def _compile_detailed_turn(records: list[dict[str, Any]]) -> list[dict[str, Any]
 
     for record in records:
         if not is_typed_record(record):
-            entry: dict[str, Any] = {
-                "role": record["role"],
+            role = record.get("role")
+            if role == "assistant":
+                entry = {"role": "assistant", "content": record.get("content", "")}
+                if isinstance(record.get("tool_calls"), list):
+                    entry["tool_calls"] = record["tool_calls"]
+                    for tool_call in record["tool_calls"]:
+                        if isinstance(tool_call, dict) and tool_call.get("id"):
+                            seen_tool_calls.add(tool_call["id"])
+                compiled.append(entry)
+                continue
+            if role == "tool":
+                call_id = record.get("tool_call_id")
+                if call_id and call_id not in seen_tool_calls:
+                    continue
+                compiled.append({
+                    "role": "tool",
+                    "tool_call_id": call_id,
+                    "name": record.get("name"),
+                    "content": record.get("content", ""),
+                })
+                continue
+            compiled.append({
+                "role": role,
                 "content": record.get("content", ""),
-            }
-            for key in ("tool_calls", "tool_call_id", "name"):
-                if key in record:
-                    entry[key] = record[key]
-            compiled.append(entry)
+            })
             continue
 
         item_type = record.get("type")

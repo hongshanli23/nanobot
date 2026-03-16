@@ -147,6 +147,33 @@ def test_get_history_drops_orphan_tool_results() -> None:
     assert history == [{"role": "assistant", "content": "I checked the file."}]
 
 
+def test_get_history_preserves_legacy_tool_linkage() -> None:
+    session = Session(key="test:legacy-tool-linkage")
+    session.messages = [
+        {"role": "user", "content": "inspect foo.py"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "call_legacy",
+                "type": "function",
+                "function": {"name": "read_file", "arguments": "{\"path\":\"foo.py\"}"},
+            }],
+        },
+        {"role": "tool", "tool_call_id": "call_legacy", "name": "read_file", "content": "line1\nline2"},
+        {"role": "assistant", "content": "The file defines one helper."},
+        {"role": "user", "content": "say hi"},
+        {"role": "assistant", "content": "hi"},
+    ]
+
+    history = session.get_history(max_messages=4)
+
+    assert history == [
+        {"role": "user", "content": "say hi"},
+        {"role": "assistant", "content": "hi"},
+    ]
+
+
 class _DummyProvider(LLMProvider):
     async def chat(self, *args, **kwargs):
         raise NotImplementedError
